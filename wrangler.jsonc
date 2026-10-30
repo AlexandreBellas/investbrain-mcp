@@ -1,0 +1,50 @@
+/**
+ * Cloudflare Workers config for the Investbrain MCP server.
+ * Free plan: Workers plus one SQLite Durable Object for auth lockouts.
+ * No paid bindings (no Workers Rate Limiting, AI, or queues).
+ *
+ * INVESTBRAIN_BASE_URL and ALLOWED_HOSTNAMES are intentionally empty in git.
+ * `pnpm run deploy` overrides them with `wrangler deploy --var` from the
+ * process environment (Workers Builds build variables, or GitHub Actions secrets).
+ * The default `npx wrangler deploy` does not. Local dev overrides both with .dev.vars.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "investbrain-mcp",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-29",
+	"compatibility_flags": ["nodejs_compat"],
+	"migrations": [
+		{
+			"new_sqlite_classes": ["AuthRateLimit"],
+			"tag": "v1",
+		},
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "AuthRateLimit",
+				"name": "AUTH_RATE_LIMIT",
+			},
+		],
+	},
+	"vars": {
+		"AUTH_FAILURE_LIMIT": "10",
+		"AUTH_FAILURE_WINDOW_SECONDS": "900",
+		"AUTH_LOCKOUT_SECONDS": "1800",
+		"INVESTBRAIN_BASE_URL": "",
+		"ALLOWED_HOSTNAMES": "",
+	},
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+		},
+		"traces": {
+			"enabled": true,
+			"head_sampling_rate": 0.01,
+		},
+	},
+	"upload_source_maps": true,
+}

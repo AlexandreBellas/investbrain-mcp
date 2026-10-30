@@ -1,0 +1,12 @@
+# Copy to .dev.vars for local `pnpm dev`. Never commit .dev.vars.
+# Public origin of your Investbrain app. No credentials, query, or fragment.
+INVESTBRAIN_BASE_URL=https://investbrain.example.com
+
+# Optional. Comma-separated hostnames for a custom domain. No scheme or port.
+# ALLOWED_HOSTNAMES=mcp.example.com
+
+# Optional lockout overrides. Wrangler vars are the defaults:
+# 10 failures / 900 seconds, then an 1800 second lockout.
+# AUTH_FAILURE_LIMIT=10
+# AUTH_FAILURE_WINDOW_SECONDS=900
+# AUTH_LOCKOUT_SECONDS=1800
