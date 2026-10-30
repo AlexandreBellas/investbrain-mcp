@@ -89,16 +89,30 @@ export function listQueryParams(query: ListQuery): URLSearchParams {
 }
 
 /**
+ * Workers throw TypeError "Illegal invocation" when the global `fetch` runs
+ * with `this` set to another object. Call it through a free function.
+ */
+const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
+
+function freeFetch(fetchImpl: typeof fetch): typeof fetch {
+	return (input, init) => fetchImpl(input, init);
+}
+
+/**
  * Calls one Investbrain API path. The token is held only for this client instance,
  * which is created per MCP request and is not written to storage or logs.
  * Redirects are not followed, so Authorization is not sent to another host.
  */
 export class InvestbrainClient {
+	private readonly fetchImpl: typeof fetch;
+
 	constructor(
 		private readonly baseUrl: string,
 		private readonly token: string,
-		private readonly fetchImpl: typeof fetch = fetch,
-	) {}
+		fetchImpl?: typeof fetch,
+	) {
+		this.fetchImpl = freeFetch(fetchImpl ?? defaultFetch);
+	}
 
 	getMe() {
 		return this.request("GET", "/me");
@@ -190,14 +204,24 @@ export class InvestbrainClient {
 		}
 
 		let response: Response;
+		const fetchImpl = this.fetchImpl;
 		try {
-			response = await this.fetchImpl(url, {
+			response = await fetchImpl(url, {
 				method,
 				headers,
 				body: payload,
 				redirect: "manual",
 			});
-		} catch {
+		} catch (error) {
+			const name = error instanceof Error ? error.name : "NonError";
+			const detail = error instanceof Error ? redact(error.message, this.token) : "non-error throw";
+			console.error(
+				JSON.stringify({
+					message: "Investbrain request failed",
+					name,
+					error: detail.slice(0, 500),
+				}),
+			);
 			throw new InvestbrainApiError("Investbrain could not be reached.", 0);
 		}
 
