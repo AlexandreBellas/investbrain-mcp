@@ -189,6 +189,36 @@ describe("Investbrain MCP tools", () => {
 		expect(url.searchParams.get("filter[holdings.symbol]")).toBe("AAPL");
 	});
 
+	it("requires cost_basis for BUY and sale_price for SELL", async () => {
+		const tool = investbrainTools.find((item) => item.name === "investbrain_create_transaction");
+		if (tool === undefined) throw new Error("missing create transaction");
+		const mocked = mockFetch(() => Response.json({ ok: true }));
+		const client = new InvestbrainClient(BASE_URL, TOKEN, mocked.fetch);
+		const base = {
+			portfolio_id: PORTFOLIO_ID,
+			symbol: "AAPL",
+			date: "2026-10-01",
+			quantity: 2,
+			currency: "USD",
+		};
+		expect(() => tool.call(client, { ...base, transaction_type: "BUY" })).toThrow(/cost_basis/);
+		expect(() => tool.call(client, { ...base, transaction_type: "SELL" })).toThrow(/sale_price/);
+		expect(() => tool.call(client, { ...base, transaction_type: "BUY", cost_basis: 1, sale_price: 2 })).toThrow(
+			/sale_price/,
+		);
+		expect(() => tool.call(client, { ...base, transaction_type: "SELL", sale_price: 2, cost_basis: 1 })).toThrow(
+			/cost_basis/,
+		);
+		expect(mocked.calls).toHaveLength(0);
+
+		await tool.call(client, { ...base, transaction_type: "SELL", sale_price: 20 });
+		expect(JSON.parse(mocked.calls[0]?.body ?? "")).toEqual({
+			...base,
+			transaction_type: "SELL",
+			sale_price: 20,
+		});
+	});
+
 	it("returns a tool error that does not include the token when Investbrain rejects the call", async () => {
 		const mocked = mockFetch(
 			() => new Response(JSON.stringify({ message: `unauthenticated ${TOKEN}` }), { status: 401 }),

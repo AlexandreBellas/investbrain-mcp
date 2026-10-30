@@ -6,6 +6,7 @@ interface __BaseEnv_Env {
 	AUTH_FAILURE_WINDOW_SECONDS: "900";
 	AUTH_LOCKOUT_SECONDS: "1800";
 	INVESTBRAIN_BASE_URL: string;
+	ALLOWED_HOSTNAMES: string;
 	AUTH_RATE_LIMIT: DurableObjectNamespace<import("./src/index").AuthRateLimit>;
 }
 declare namespace Cloudflare {
@@ -20,7 +21,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "AUTH_FAILURE_LIMIT" | "AUTH_FAILURE_WINDOW_SECONDS" | "AUTH_LOCKOUT_SECONDS" | "INVESTBRAIN_BASE_URL">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "AUTH_FAILURE_LIMIT" | "AUTH_FAILURE_WINDOW_SECONDS" | "AUTH_LOCKOUT_SECONDS" | "INVESTBRAIN_BASE_URL" | "ALLOWED_HOSTNAMES">> {}
 }
 declare module "*.txt" {
 	const value: string;

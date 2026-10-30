@@ -185,33 +185,60 @@ const portfolioUpdateSchema = z
 		message: "Provide title, notes, or wishlist to update.",
 	});
 
-const buySchema = z.object({
-	portfolio_id: portfolioId,
-	symbol,
-	transaction_type: z.literal("BUY"),
-	date: tradeDate,
-	quantity,
-	currency,
-	cost_basis: z
-		.number()
-		.min(0)
-		.describe("Cost basis stored on the BUY. Required for BUY. Do not send it for a SELL."),
-});
-
-const sellSchema = z.object({
-	portfolio_id: portfolioId,
-	symbol,
-	transaction_type: z.literal("SELL"),
-	date: tradeDate,
-	quantity,
-	currency,
-	sale_price: z
-		.number()
-		.min(0)
-		.describe("Sale price stored on the SELL. Required for SELL. Do not send it for a BUY."),
-});
-
-const transactionCreateSchema = z.discriminatedUnion("transaction_type", [buySchema, sellSchema]);
+const transactionCreateSchema = z
+	.object({
+		portfolio_id: portfolioId,
+		symbol,
+		transaction_type: z
+			.enum(["BUY", "SELL"])
+			.describe("BUY requires cost_basis. SELL requires sale_price."),
+		date: tradeDate,
+		quantity,
+		currency,
+		cost_basis: z
+			.number()
+			.min(0)
+			.optional()
+			.describe("Required for BUY. Omit it for a SELL."),
+		sale_price: z
+			.number()
+			.min(0)
+			.optional()
+			.describe("Required for SELL. Omit it for a BUY."),
+	})
+	.superRefine((value, ctx) => {
+		if (value.transaction_type === "BUY") {
+			if (value.cost_basis === undefined) {
+				ctx.addIssue({
+					code: "custom",
+					message: "BUY requires cost_basis.",
+					path: ["cost_basis"],
+				});
+			}
+			if (value.sale_price !== undefined) {
+				ctx.addIssue({
+					code: "custom",
+					message: "BUY must not include sale_price.",
+					path: ["sale_price"],
+				});
+			}
+			return;
+		}
+		if (value.sale_price === undefined) {
+			ctx.addIssue({
+				code: "custom",
+				message: "SELL requires sale_price.",
+				path: ["sale_price"],
+			});
+		}
+		if (value.cost_basis !== undefined) {
+			ctx.addIssue({
+				code: "custom",
+				message: "SELL must not include cost_basis.",
+				path: ["cost_basis"],
+			});
+		}
+	});
 
 const transactionUpdateSchema = z
 	.object({
@@ -465,7 +492,7 @@ export function registerInvestbrainTools(server: McpServer, client: InvestbrainC
 
 function toolResult(result: unknown): ToolResult {
 	if (typeof result === "string") return { content: [{ type: "text", text: result }] };
-	return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+	return { content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
 function toolError(error: unknown): ToolResult {

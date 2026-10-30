@@ -3,9 +3,10 @@
  * Free plan: Workers plus one SQLite Durable Object for auth lockouts.
  * No paid bindings (no Workers Rate Limiting, AI, or queues).
  *
- * INVESTBRAIN_BASE_URL is intentionally empty in git. The deploy workflow
- * replaces the placeholder `"INVESTBRAIN_BASE_URL": ""` from the
- * INVESTBRAIN_BASE_URL GitHub secret. Local dev overrides it with .dev.vars.
+ * INVESTBRAIN_BASE_URL and ALLOWED_HOSTNAMES are intentionally empty in git.
+ * `pnpm run deploy` overrides them with `wrangler deploy --var` from the
+ * process environment (Workers Builds build variables, or GitHub Actions secrets).
+ * The default `npx wrangler deploy` does not. Local dev overrides both with .dev.vars.
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
@@ -32,6 +33,7 @@
 		"AUTH_FAILURE_WINDOW_SECONDS": "900",
 		"AUTH_LOCKOUT_SECONDS": "1800",
 		"INVESTBRAIN_BASE_URL": "",
+		"ALLOWED_HOSTNAMES": "",
 	},
 	"observability": {
 		"enabled": true,

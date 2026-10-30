@@ -19,7 +19,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"deploy": "wrangler deploy",
+		"deploy": "node scripts/apply-deploy-vars.mjs",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"cf-typegen": "wrangler types && node scripts/widen-base-url-type.mjs",

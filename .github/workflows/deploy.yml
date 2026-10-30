@@ -2,9 +2,6 @@ name: Deploy
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 concurrency:
   group: cloudflare-deploy
@@ -29,12 +26,13 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm type-check
+      - run: pnpm test
 
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           INVESTBRAIN_BASE_URL: ${{ secrets.INVESTBRAIN_BASE_URL }}
-        run: |
-          node scripts/inject-base-url.mjs
-          pnpm exec wrangler deploy
+          ALLOWED_HOSTNAMES: ${{ secrets.ALLOWED_HOSTNAMES }}
+        run: pnpm run deploy

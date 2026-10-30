@@ -119,6 +119,16 @@ function clamp(value: number, fallback: number, max: number): number {
 	return value;
 }
 
+/** True when a Durable Object row would change if `after` replaced `before`. */
+export function failureStateChanged(before: FailureState, after: FailureState): boolean {
+	if (before.lockoutUntilMs !== after.lockoutUntilMs) return true;
+	if (before.failures.length !== after.failures.length) return true;
+	for (let index = 0; index < before.failures.length; index += 1) {
+		if (before.failures[index] !== after.failures[index]) return true;
+	}
+	return false;
+}
+
 export function secondsUntil(untilMs: number, now: number): number {
 	return Math.max(1, Math.ceil((untilMs - now) / 1000));
 }

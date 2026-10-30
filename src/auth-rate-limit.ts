@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
 	applyFailure,
 	EMPTY_FAILURE_STATE,
+	failureStateChanged,
 	readLockout,
 	sanitizePolicy,
 	type AuthFailurePolicy,
@@ -35,12 +36,16 @@ export class AuthRateLimit extends DurableObject<Env> {
 		});
 	}
 
-	/** Hot path after a token has already been accepted. Does not count the request. */
+	/**
+	 * Hot path after a token has already been accepted. Does not count the request.
+	 * Writes the row only when an expired lockout is cleared.
+	 */
 	check(): AuthGate {
 		return this.ctx.storage.transactionSync(() => {
 			const now = Date.now();
-			const next = readLockout(this.read(), now);
-			this.write(next.state);
+			const current = this.read();
+			const next = readLockout(current, now);
+			this.persistIfChanged(current, next.state);
 			return next.gate;
 		});
 	}
@@ -50,10 +55,15 @@ export class AuthRateLimit extends DurableObject<Env> {
 		const safe = sanitizePolicy(policy);
 		return this.ctx.storage.transactionSync(() => {
 			const now = Date.now();
-			const next = applyFailure(this.read(), now, safe);
-			this.write(next.state);
+			const current = this.read();
+			const next = applyFailure(current, now, safe);
+			this.persistIfChanged(current, next.state);
 			return next.gate;
 		});
+	}
+
+	private persistIfChanged(before: FailureState, after: FailureState): void {
+		if (failureStateChanged(before, after)) this.write(after);
 	}
 
 	private read(): FailureState {

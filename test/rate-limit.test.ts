@@ -3,6 +3,7 @@ import {
 	applyFailure,
 	authFailurePolicy,
 	EMPTY_FAILURE_STATE,
+	failureStateChanged,
 	readLockout,
 	type FailureState,
 } from "../src/rate-limit-policy";
@@ -48,6 +49,21 @@ describe("auth failure rate limiter", () => {
 		const again = applyFailure(expired.state, locked.state.lockoutUntilMs! + 1, policy);
 		expect(again.gate.locked).toBe(false);
 		expect(again.state.failures).toHaveLength(1);
+	});
+
+	it("reports a row change only when the stored failure state differs", () => {
+		const open = { failures: [1], lockoutUntilMs: null };
+		expect(failureStateChanged(open, readLockout(open, 5).state)).toBe(false);
+
+		const locked = { failures: [] as number[], lockoutUntilMs: 10_000 };
+		expect(failureStateChanged(locked, readLockout(locked, 1_000).state)).toBe(false);
+		expect(failureStateChanged(locked, readLockout(locked, 10_000).state)).toBe(true);
+
+		const again = applyFailure(locked, 1_000, policy);
+		expect(failureStateChanged(locked, again.state)).toBe(false);
+
+		const counted = applyFailure(open, 2, policy);
+		expect(failureStateChanged(open, counted.state)).toBe(true);
 	});
 
 	it("falls back when the configured limits are not positive integers in range", () => {
