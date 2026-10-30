@@ -1,0 +1,40 @@
+{
+	"name": "investbrain-mcp",
+	"version": "1.0.0",
+	"private": false,
+	"description": "Remote MCP server for a self-hosted Investbrain portfolio tracker, running on Cloudflare Workers.",
+	"keywords": [
+		"mcp",
+		"model-context-protocol",
+		"investbrain",
+		"portfolio",
+		"cloudflare-workers",
+		"laravel",
+		"sanctum"
+	],
+	"license": "MIT",
+	"type": "module",
+	"packageManager": "pnpm@10.12.1",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"cf-typegen": "wrangler types && node scripts/widen-base-url-type.mjs",
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/server": "2.4.0",
+		"agents": "0.32.0",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@types/node": "^25.9.1",
+		"typescript": "6.0.2",
+		"vitest": "^3.2.4",
+		"wrangler": "^4.94.0"
+	}
+}
