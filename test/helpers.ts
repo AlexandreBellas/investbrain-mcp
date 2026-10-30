@@ -70,6 +70,23 @@ export type FetchCall = {
 	redirect: RequestInit["redirect"];
 };
 
+/**
+ * Fetch double that throws TypeError "Illegal invocation" when called as a
+ * method of an object other than the global. A free call (`this` undefined)
+ * and a call on `globalThis` both succeed.
+ */
+export function invocationSensitiveFetch(
+	handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>,
+): typeof fetch {
+	const fetchImpl = async function (this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		if (this !== globalThis && this !== undefined) {
+			throw new TypeError("Illegal invocation");
+		}
+		return handler(input, init);
+	};
+	return fetchImpl as typeof fetch;
+}
+
 export function mockFetch(handler: (call: FetchCall) => Response): {
 	fetch: typeof fetch;
 	calls: FetchCall[];

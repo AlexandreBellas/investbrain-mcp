@@ -110,7 +110,9 @@ export async function authorizeMcpRequest(
 	const validationKey = await tokenDigest(token);
 	if (validationFresh(validationKey, clock())) return null;
 
-	const client = new InvestbrainClient(baseUrl, token, deps.fetchImpl ?? fetch);
+	// Leave fetchImpl unset so the client uses its free-function default.
+	// Passing the global fetch and calling it as a method throws on Workers.
+	const client = new InvestbrainClient(baseUrl, token, deps.fetchImpl);
 	try {
 		await client.getMe();
 	} catch (error) {
