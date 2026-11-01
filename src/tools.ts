@@ -1,9 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { InvestbrainApiError, type InvestbrainClient, type ListQuery, type PortfolioWrite, type TransactionWrite } from "./investbrain";
+import {
+	InvestbrainApiError,
+	type DividendListQuery,
+	type DividendWrite,
+	type InvestbrainClient,
+	type ListQuery,
+	type PortfolioWrite,
+	type TransactionWrite,
+} from "./investbrain";
 
 const portfolioId = z.uuid().describe("Portfolio UUID.");
 const transactionId = z.uuid().describe("Transaction UUID.");
+const dividendId = z.uuid().describe("Dividend UUID.");
 const symbol = z
 	.string()
 	.trim()
@@ -58,6 +67,13 @@ const itemsPerPage = z
 	})
 	.optional()
 	.describe("Page size. Investbrain's default is 15. -1 asks for every matching row.");
+const dividendItemsPerPage = z
+	.number()
+	.int()
+	.min(1)
+	.max(100)
+	.optional()
+	.describe("Page size from 1 to 100. Investbrain's default is 15. Dividend lists do not accept -1.");
 const sortBy = z
 	.string()
 	.regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
@@ -295,6 +311,164 @@ function transactionBody(args: {
 	return body;
 }
 
+const DIVIDEND_SORT_COLUMNS = new Set([
+	"symbol",
+	"date",
+	"dividend_amount",
+	"source",
+	"created_at",
+	"updated_at",
+]);
+const DIVIDEND_AMOUNT_MAX = 999_999_999_999;
+
+function isCalendarDate(value: string): boolean {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	if (match === null) return false;
+	const year = Number(match[1]);
+	const month = Number(match[2]);
+	const day = Number(match[3]);
+	const date = new Date(Date.UTC(year, month - 1, day));
+	return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function hasAtMostEightDecimalPlaces(value: number): boolean {
+	return Number.isFinite(value) && Number(value.toFixed(8)) === value;
+}
+
+function commaSeparated(value: string): string {
+	return value
+		.split(",")
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0)
+		.join(",");
+}
+
+const entitlementDate = z
+	.string()
+	.regex(/^\d{4}-\d{2}-\d{2}$/)
+	.refine(isCalendarDate, { message: "date must be a real calendar date in YYYY-MM-DD." })
+	.describe(
+		"Inclusive entitlement date in YYYY-MM-DD. For B3 this is data-com, not the payment date and not Yahoo's ex-date. Shares bought or sold on this date count. One dividend row exists per symbol per date.",
+	);
+const dividendAmount = z
+	.number()
+	.gt(0)
+	.max(DIVIDEND_AMOUNT_MAX)
+	.refine(hasAtMostEightDecimalPlaces, {
+		message: "dividend_amount must have at most 8 decimal places.",
+	})
+	.describe(
+		"Gross per-share amount in the symbol's trading currency. Greater than 0, at most 999999999999, at most 8 decimal places. The app does not withhold tax. For B3, sum same-day proventos (dividendo, JCP, and any other provento) into this one number.",
+	);
+const dividendSort = z
+	.string()
+	.trim()
+	.min(1)
+	.max(200)
+	.refine(
+		(value) =>
+			value.split(",").every((part) => {
+				const column = part.trim();
+				if (column.length === 0) return false;
+				const name = column.startsWith("-") ? column.slice(1) : column;
+				return DIVIDEND_SORT_COLUMNS.has(name);
+			}),
+		{
+			message:
+				"sort must list symbol, date, dividend_amount, source, created_at, or updated_at, separated by commas. Prefix a column with - to sort descending.",
+		},
+	)
+	.optional()
+	.describe(
+		"Comma-separated columns: symbol, date, dividend_amount, source, created_at, updated_at. Prefix a column with - for descending, for example -date. Default order is date descending, then id ascending.",
+	);
+const dividendFilterSymbol = z
+	.string()
+	.trim()
+	.min(1)
+	.max(5_000)
+	.refine(
+		(value) =>
+			value.split(",").every((part) => {
+				const ticker = part.trim();
+				return ticker.length >= 1 && ticker.length <= 25;
+			}),
+		{ message: "symbol must be one ticker or a comma-separated list. Each ticker is 1 to 25 characters." },
+	)
+	.optional()
+	.describe(
+		"One ticker or a comma-separated list. Sent as filter[symbol]. Matched case-insensitively.",
+	);
+
+const dividendListSchema = z.object({
+	page,
+	itemsPerPage: dividendItemsPerPage,
+	search: z
+		.string()
+		.max(255)
+		.optional()
+		.describe("Case-insensitive partial match against the symbol. Maximum length is 255."),
+	sort: dividendSort,
+	symbol: dividendFilterSymbol,
+	source: z
+		.enum(["sync", "manual"])
+		.optional()
+		.describe("Sent as filter[source]. sync is a provider row. manual was created or edited by hand."),
+	date: entitlementDate
+		.optional()
+		.describe("Exact entitlement date, YYYY-MM-DD. Sent as filter[date]. For B3 this is data-com."),
+});
+
+const dividendCreateSchema = z.object({
+	symbol,
+	date: entitlementDate,
+	dividend_amount: dividendAmount,
+});
+
+const dividendUpdateSchema = z
+	.object({
+		id: dividendId,
+		symbol: symbol.optional(),
+		date: entitlementDate.optional(),
+		dividend_amount: dividendAmount.optional(),
+	})
+	.refine(
+		(value) => value.symbol !== undefined || value.date !== undefined || value.dividend_amount !== undefined,
+		{ message: "Provide symbol, date, or dividend_amount to update." },
+	);
+
+function dividendListQuery(args: {
+	page?: number;
+	itemsPerPage?: number;
+	search?: string;
+	sort?: string;
+	symbol?: string;
+	source?: "sync" | "manual";
+	date?: string;
+}): DividendListQuery {
+	return {
+		page: args.page,
+		itemsPerPage: args.itemsPerPage,
+		search: args.search,
+		sort: args.sort === undefined ? undefined : commaSeparated(args.sort),
+		symbol: args.symbol === undefined ? undefined : commaSeparated(args.symbol),
+		source: args.source,
+		date: args.date,
+	};
+}
+
+function dividendBody(args: {
+	symbol?: string;
+	date?: string;
+	dividend_amount?: number;
+}): DividendWrite {
+	const body: DividendWrite = {};
+	if (args.symbol !== undefined) body.symbol = args.symbol;
+	if (args.date !== undefined) body.date = args.date;
+	if (args.dividend_amount !== undefined) body.dividend_amount = args.dividend_amount;
+	return body;
+}
+
 export const investbrainTools: InvestbrainTool[] = [
 	{
 		name: "investbrain_get_me",
@@ -455,6 +629,58 @@ export const investbrainTools: InvestbrainTool[] = [
 			return client.updateHolding(parsed.portfolio, parsed.symbol, {
 				reinvest_dividends: parsed.reinvest_dividends,
 			});
+		},
+	},
+	{
+		name: "investbrain_list_dividends",
+		title: "List dividends",
+		description:
+			"GET /api/dividend. Lists dividends for symbols on portfolios the token's user belongs to (owner, full access, or read-only). Dividends are shared by every holding of a symbol, not owned by one portfolio. Each object has id, symbol, date, dividend_amount, dividend_amount_base, source (sync or manual), created_at, and updated_at. date is the inclusive entitlement date: for B3 use data-com, not the payment date and not Yahoo's ex-date. dividend_amount is the gross per-share amount in the symbol's trading currency. One row exists per symbol per date, so sum same-day proventos (dividendo, JCP, and any other provento) into that amount. dividend_amount_base is that amount in the app base currency. The response is paginated (data, links, meta). Supports page (default 1), itemsPerPage (1 to 100, default 15; -1 is not accepted), sort (comma-separated columns symbol, date, dividend_amount, source, created_at, updated_at; prefix - for descending, for example -date; default is date descending then id ascending), search (case-insensitive partial symbol match, max 255), symbol (one ticker or a comma-separated list, sent as filter[symbol]), source (sync or manual, sent as filter[source]), and date (exact YYYY-MM-DD, sent as filter[date]). An unknown sort column or filter name is a 422 from Investbrain and is returned as a tool error.",
+		annotations: readOnly,
+		inputSchema: dividendListSchema,
+		call: (client, args) => client.listDividends(dividendListQuery(dividendListSchema.parse(args))),
+	},
+	{
+		name: "investbrain_get_dividend",
+		title: "Get dividend",
+		description:
+			"GET /api/dividend/{id}. Returns one dividend, unwrapped, when the token's user holds that symbol. A symbol the user does not hold is 404, so existence is not leaked. date is the inclusive entitlement date (B3 data-com, not the payment date). dividend_amount is gross per share in the trading currency. source is sync (provider) or manual (created or edited by hand). Manual rows survive the automatic Yahoo sync.",
+		annotations: readOnly,
+		inputSchema: z.object({ id: dividendId }),
+		call: (client, args) => client.getDividend(z.object({ id: dividendId }).parse(args).id),
+	},
+	{
+		name: "investbrain_create_dividend",
+		title: "Create dividend",
+		description:
+			"POST /api/dividend. Creates one dividend and returns 201 with the unwrapped object. Stores source=manual. source and dividend_amount_base are ignored if sent. Requires symbol (max 25 characters, stored uppercase, must exist in Investbrain market data or at its configured provider), date (YYYY-MM-DD), and dividend_amount (greater than 0, at most 999999999999, at most 8 decimal places). date is the inclusive entitlement date: for B3 set data-com, not the payment date and not Yahoo's ex-date. Shares bought or sold on that date count toward dividends_earned; a trade the next day does not. dividend_amount is gross per share in the symbol's trading currency. The app does not withhold tax. One row per symbol per calendar date: sum same-day proventos (dividendo, JCP, and others) into a single dividend_amount. A duplicate symbol and date is 422, and that message is returned as a tool error. Requires full access or ownership of a portfolio that holds the symbol. A read-only member, or a user who does not hold the symbol, gets 403. Investbrain recalculates dividends_earned for every holding of the symbol. Creating a dividend does not create a reinvestment buy. A manual row survives the automatic Yahoo sync.",
+		annotations: createHints,
+		inputSchema: dividendCreateSchema,
+		call: (client, args) => client.createDividend(dividendBody(dividendCreateSchema.parse(args))),
+	},
+	{
+		name: "investbrain_update_dividend",
+		title: "Update dividend",
+		description:
+			"Destructive: PUT /api/dividend/{id}. Changes any subset of symbol, date, and dividend_amount on a dividend the token's user can fully access. Omitted fields stay as they are. At least one of those fields is required. Investbrain accepts PUT and PATCH on this route; this tool sends PUT. The row becomes source=manual. source and dividend_amount_base are ignored. date is the inclusive entitlement date (B3 data-com). dividend_amount is gross per share in the trading currency, greater than 0, at most 8 decimal places; sum same-day proventos into one amount. One row per symbol per date. Moving the symbol or date records the old pair so Yahoo sync will not recreate it, and deletes reinvestment buys for the old symbol and date. Changing only the amount updates an existing reinvestment buy on that date when the holding has reinvest_dividends on. A read-only member gets 403. A dividend for a symbol you do not hold is 404. Moving the row onto a symbol you cannot fully access returns 403 and leaves the row unchanged. Investbrain recalculates dividends_earned. Validation failures are 422 and the API message is returned as a tool error. Manual edits survive the automatic Yahoo sync.",
+		annotations: updateHints,
+		inputSchema: dividendUpdateSchema,
+		call: (client, args) => {
+			const parsed = dividendUpdateSchema.parse(args);
+			return client.updateDividend(parsed.id, dividendBody(parsed));
+		},
+	},
+	{
+		name: "investbrain_delete_dividend",
+		title: "Delete dividend",
+		description:
+			"Destructive: DELETE /api/dividend/{id}. Permanently deletes the dividend. Investbrain responds 204 with an empty body. It remembers that symbol and date so the automatic Yahoo sync will not recreate the row, deletes reinvestment buys for that symbol and date, and recalculates dividends_earned. Requires full access. A read-only member gets 403. A dividend you cannot see is 404. This cannot be undone by the MCP server.",
+		annotations: deleteHints,
+		inputSchema: z.object({ id: dividendId }),
+		call: async (client, args) => {
+			const { id } = z.object({ id: dividendId }).parse(args);
+			await client.deleteDividend(id);
+			return `Deleted dividend ${id}.`;
 		},
 	},
 	{

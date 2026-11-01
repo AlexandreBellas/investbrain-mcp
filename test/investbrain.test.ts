@@ -35,4 +35,23 @@ describe("InvestbrainClient", () => {
 			expect((error as Error).message).toContain("[redacted]");
 		}
 	});
+
+	it("surfaces a dividend 422 message and field errors", async () => {
+		const mocked = mockFetch(
+			() =>
+				new Response(
+					JSON.stringify({
+						message: "A dividend for this symbol and date already exists.",
+						errors: { date: ["A dividend for this symbol and date already exists."] },
+					}),
+					{ status: 422 },
+				),
+		);
+		const client = new InvestbrainClient(BASE_URL, TOKEN, mocked.fetch);
+		await expect(
+			client.createDividend({ symbol: "PETR4.SA", date: "2024-08-15", dividend_amount: 0.85 }),
+		).rejects.toThrow(
+			"Investbrain API returned 422: A dividend for this symbol and date already exists.; date: A dividend for this symbol and date already exists.",
+		);
+	});
 });
