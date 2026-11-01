@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 import { InvestbrainClient } from "../src/investbrain";
 import { registerInvestbrainTools, investbrainTools } from "../src/tools";
-import { BASE_URL, mockFetch, PORTFOLIO_ID, TOKEN, TRANSACTION_ID } from "./helpers";
+import { BASE_URL, DIVIDEND_ID, mockFetch, PORTFOLIO_ID, TOKEN, TRANSACTION_ID } from "./helpers";
 
 const symbol = "BRK.B";
 
@@ -28,6 +28,11 @@ describe("Investbrain MCP tools", () => {
 			"investbrain_list_holdings",
 			"investbrain_get_holding",
 			"investbrain_update_holding",
+			"investbrain_list_dividends",
+			"investbrain_get_dividend",
+			"investbrain_create_dividend",
+			"investbrain_update_dividend",
+			"investbrain_delete_dividend",
 			"investbrain_get_market_data",
 		]);
 
@@ -38,6 +43,8 @@ describe("Investbrain MCP tools", () => {
 			"investbrain_update_transaction",
 			"investbrain_delete_transaction",
 			"investbrain_update_holding",
+			"investbrain_update_dividend",
+			"investbrain_delete_dividend",
 		]);
 		for (const tool of destructive) {
 			expect(tool.description.startsWith("Destructive:")).toBe(true);
@@ -138,6 +145,41 @@ describe("Investbrain MCP tools", () => {
 				path: `/api/holding/${PORTFOLIO_ID}/AAPL`,
 				body: { reinvest_dividends: true },
 			},
+			{
+				name: "investbrain_list_dividends",
+				args: {
+					page: 2,
+					itemsPerPage: 25,
+					search: "petr",
+					sort: "-date, symbol",
+					symbol: "PETR4.SA, VALE3.SA",
+					source: "manual",
+					date: "2024-08-15",
+				},
+				method: "GET",
+				path: "/api/dividend",
+			},
+			{ name: "investbrain_get_dividend", args: { id: DIVIDEND_ID }, method: "GET", path: `/api/dividend/${DIVIDEND_ID}` },
+			{
+				name: "investbrain_create_dividend",
+				args: { symbol: "PETR4.SA", date: "2024-08-15", dividend_amount: 0.85 },
+				method: "POST",
+				path: "/api/dividend",
+				body: { symbol: "PETR4.SA", date: "2024-08-15", dividend_amount: 0.85 },
+			},
+			{
+				name: "investbrain_update_dividend",
+				args: { id: DIVIDEND_ID, dividend_amount: 1.25 },
+				method: "PUT",
+				path: `/api/dividend/${DIVIDEND_ID}`,
+				body: { dividend_amount: 1.25 },
+			},
+			{
+				name: "investbrain_delete_dividend",
+				args: { id: DIVIDEND_ID },
+				method: "DELETE",
+				path: `/api/dividend/${DIVIDEND_ID}`,
+			},
 			{ name: "investbrain_get_market_data", args: { symbol: "MSFT" }, method: "GET", path: "/api/market-data/MSFT" },
 		];
 
@@ -187,6 +229,62 @@ describe("Investbrain MCP tools", () => {
 		expect(url.searchParams.get("sortBy")).toBe("title");
 		expect(url.searchParams.get("sortDesc")).toBe("true");
 		expect(url.searchParams.get("filter[holdings.symbol]")).toBe("AAPL");
+	});
+
+	it("sends dividend list filters as Investbrain query parameters", async () => {
+		const mocked = mockFetch(() => Response.json({ data: [] }));
+		const client = new InvestbrainClient(BASE_URL, TOKEN, mocked.fetch);
+		const tool = investbrainTools.find((item) => item.name === "investbrain_list_dividends");
+		await tool?.call(client, {
+			page: 2,
+			itemsPerPage: 25,
+			search: "petr",
+			sort: "-date, symbol",
+			symbol: "PETR4.SA, VALE3.SA",
+			source: "manual",
+			date: "2024-08-15",
+		});
+		const url = new URL(mocked.calls[0]?.url ?? "");
+		expect(url.searchParams.get("page")).toBe("2");
+		expect(url.searchParams.get("itemsPerPage")).toBe("25");
+		expect(url.searchParams.get("search")).toBe("petr");
+		expect(url.searchParams.get("sort")).toBe("-date,symbol");
+		expect(url.searchParams.get("filter[symbol]")).toBe("PETR4.SA,VALE3.SA");
+		expect(url.searchParams.get("filter[source]")).toBe("manual");
+		expect(url.searchParams.get("filter[date]")).toBe("2024-08-15");
+		expect(url.searchParams.get("sortBy")).toBeNull();
+		expect(url.searchParams.get("sortDesc")).toBeNull();
+	});
+
+	it("rejects dividend writes and list filters that Investbrain would reject", async () => {
+		const mocked = mockFetch(() => Response.json({ ok: true }));
+		const client = new InvestbrainClient(BASE_URL, TOKEN, mocked.fetch);
+		const create = investbrainTools.find((item) => item.name === "investbrain_create_dividend");
+		const update = investbrainTools.find((item) => item.name === "investbrain_update_dividend");
+		const list = investbrainTools.find((item) => item.name === "investbrain_list_dividends");
+		if (create === undefined || update === undefined || list === undefined) throw new Error("missing dividend tool");
+
+		const valid = { symbol: "PETR4.SA", date: "2024-08-15", dividend_amount: 0.85 };
+		expect(() => create.call(client, { symbol: "PETR4.SA", date: "2024-08-15" })).toThrow(/dividend_amount/);
+		expect(() => create.call(client, { ...valid, dividend_amount: 0 })).toThrow();
+		expect(() => create.call(client, { ...valid, dividend_amount: -1 })).toThrow();
+		expect(() => create.call(client, { ...valid, dividend_amount: 1.234567891 })).toThrow(/8 decimal/);
+		expect(() => create.call(client, { ...valid, date: "2024-02-31" })).toThrow(/calendar date/);
+		expect(() => create.call(client, { ...valid, date: "15/08/2024" })).toThrow();
+		expect(() => update.call(client, { id: DIVIDEND_ID })).toThrow(/symbol, date, or dividend_amount/);
+		expect(() => list.call(client, { itemsPerPage: -1 })).toThrow();
+		expect(() => list.call(client, { itemsPerPage: 101 })).toThrow();
+		expect(() => list.call(client, { sort: "price" })).toThrow(/sort must list/);
+		expect(() => list.call(client, { source: "yahoo" })).toThrow();
+		expect(() => list.call(client, { symbol: "THIS_TICKER_IS_LONGER_THAN_25" })).toThrow(/25/);
+		expect(mocked.calls).toHaveLength(0);
+
+		await create.call(client, { ...valid, dividend_amount: 1.23456789 });
+		expect(JSON.parse(mocked.calls[0]?.body ?? "")).toEqual({
+			...valid,
+			dividend_amount: 1.23456789,
+		});
+		expect(JSON.parse(mocked.calls[0]?.body ?? "")).not.toHaveProperty("source");
 	});
 
 	it("requires cost_basis for BUY and sale_price for SELL", async () => {

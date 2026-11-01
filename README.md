@@ -4,7 +4,7 @@ Remote [Model Context Protocol](https://modelcontextprotocol.io) server for a se
 
 The Worker does not store that token.
 
-Keywords: MCP, Model Context Protocol, Investbrain, portfolio tracker, holdings, transactions, market data, Laravel Sanctum, Cloudflare Workers, self-hosted.
+Keywords: MCP, Model Context Protocol, Investbrain, portfolio tracker, holdings, transactions, dividends, market data, Laravel Sanctum, Cloudflare Workers, self-hosted.
 
 ## Tools
 
@@ -26,11 +26,20 @@ One tool per Investbrain API route under `auth:sanctum`. Update and delete tools
 | `investbrain_list_holdings` | GET | `/api/holding` |
 | `investbrain_get_holding` | GET | `/api/holding/{portfolio}/{symbol}` |
 | `investbrain_update_holding` | PUT | `/api/holding/{portfolio}/{symbol}` |
+| `investbrain_list_dividends` | GET | `/api/dividend` |
+| `investbrain_get_dividend` | GET | `/api/dividend/{dividend}` |
+| `investbrain_create_dividend` | POST | `/api/dividend` |
+| `investbrain_update_dividend` | PUT | `/api/dividend/{dividend}` |
+| `investbrain_delete_dividend` | DELETE | `/api/dividend/{dividend}` |
 | `investbrain_get_market_data` | GET | `/api/market-data/{symbol}` |
 
-List tools accept Investbrain's filter query: `page`, `itemsPerPage` (default 15, or `-1` for every row), `search`, `sortBy`, and `sortDesc`. Portfolio search matches title and notes. Transaction and holding search match the symbol. `investbrain_list_portfolios` can also filter with `holdings_symbol` (`filter[holdings.symbol]`).
+Portfolio, transaction, and holding list tools accept Investbrain's filter query: `page`, `itemsPerPage` (default 15, or `-1` for every row), `search`, `sortBy`, and `sortDesc`. Portfolio search matches title and notes. Transaction and holding search match the symbol. `investbrain_list_portfolios` can also filter with `holdings_symbol` (`filter[holdings.symbol]`).
 
-Portfolio and transaction ids are UUIDs. Create and update fields follow Investbrain's form requests: portfolio `title` is 5–255 characters; a transaction is `BUY` (requires `cost_basis`) or `SELL` (requires `sale_price`); quantity must be greater than 0; a sell cannot exceed shares owned before that date; holding update only sets `reinvest_dividends`.
+`investbrain_list_dividends` uses a different query. It accepts `page`, `itemsPerPage` (1–100, default 15; `-1` is not valid), `search` (symbol, max 255 characters), `sort` (comma-separated columns `symbol`, `date`, `dividend_amount`, `source`, `created_at`, `updated_at`, with `-` for descending, for example `-date`), `symbol` (`filter[symbol]`, one ticker or a comma-separated list), `source` (`filter[source]`: `sync` or `manual`), and `date` (`filter[date]`, exact `YYYY-MM-DD`). Default order is `date` descending, then `id` ascending. The list is paginated (`data`, `links`, `meta`). A single dividend is not wrapped.
+
+A dividend `date` is the inclusive entitlement date. For B3 that is data-com, not the payment date and not Yahoo's ex-date. Shares bought or sold on that date count. `dividend_amount` is the gross per-share amount in the trading currency. The app does not withhold tax. One row exists per symbol per date, so same-day proventos (dividendo, JCP, and others) are summed into that amount. Create and update store `source=manual`. `source` and `dividend_amount_base` sent on a write are ignored. Manual rows survive the Yahoo sync. A delete is remembered, so sync does not recreate that symbol and date. Each write recalculates `dividends_earned`. A duplicate symbol and date, or another validation failure, is a 422. The tool returns Investbrain's message and field errors.
+
+Portfolio, transaction, and dividend ids are UUIDs. Create and update fields follow Investbrain's form requests: portfolio `title` is 5–255 characters; a transaction is `BUY` (requires `cost_basis`) or `SELL` (requires `sale_price`); quantity must be greater than 0; a sell cannot exceed shares owned before that date; holding update only sets `reinvest_dividends`. A dividend create requires `symbol`, `date`, and `dividend_amount` greater than 0. A dividend update sends any subset of those fields.
 
 Laravel registers PUT and PATCH for each update action. These tools send PUT.
 
@@ -159,6 +168,7 @@ Pull requests and pushes run `pnpm install --frozen-lockfile`, `pnpm type-check`
 5. Market data is whatever that Investbrain instance has configured. Unknown symbols are a 404 from Investbrain, returned as a tool error.
 6. This uses the Workers free plan: the Worker script and one SQLite Durable Object. It does not use Workers AI, Queues, or the Rate Limiting binding.
 7. The default Host check allows `workers.dev` and localhost. Set `ALLOWED_HOSTNAMES` to add a custom hostname. Those names are also accepted as browser Origin hosts. Requests with no Origin stay valid.
+8. Dividend `date` is the entitlement date (B3 data-com). Yahoo's historical dividend date can differ from data-com and from the payment date. These tools do not convert one date into the other.
 
 ## License
 

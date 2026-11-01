@@ -43,6 +43,22 @@ export type TransactionWrite = {
 	sale_price?: number;
 };
 
+export type DividendListQuery = {
+	page?: number;
+	itemsPerPage?: number;
+	search?: string;
+	sort?: string;
+	symbol?: string;
+	source?: "sync" | "manual";
+	date?: string;
+};
+
+export type DividendWrite = {
+	symbol?: string;
+	date?: string;
+	dividend_amount?: number;
+};
+
 /**
  * Origin of a self-hosted Investbrain app. Credentials, query, and fragment are rejected
  * so the bearer token cannot be combined with a URL that already carries a secret.
@@ -85,6 +101,18 @@ export function listQueryParams(query: ListQuery): URLSearchParams {
 	if (query.holdingsSymbol !== undefined && query.holdingsSymbol !== "") {
 		params.set("filter[holdings.symbol]", query.holdingsSymbol);
 	}
+	return params;
+}
+
+export function dividendQueryParams(query: DividendListQuery): URLSearchParams {
+	const params = new URLSearchParams();
+	if (query.page !== undefined) params.set("page", String(query.page));
+	if (query.itemsPerPage !== undefined) params.set("itemsPerPage", String(query.itemsPerPage));
+	if (query.search !== undefined && query.search !== "") params.set("search", query.search);
+	if (query.sort !== undefined && query.sort !== "") params.set("sort", query.sort);
+	if (query.symbol !== undefined && query.symbol !== "") params.set("filter[symbol]", query.symbol);
+	if (query.source !== undefined) params.set("filter[source]", query.source);
+	if (query.date !== undefined && query.date !== "") params.set("filter[date]", query.date);
 	return params;
 }
 
@@ -179,6 +207,26 @@ export class InvestbrainClient {
 
 	getMarketData(symbol: string) {
 		return this.request("GET", `/market-data/${encodeURIComponent(symbol)}`);
+	}
+
+	listDividends(query: DividendListQuery) {
+		return this.request("GET", "/dividend", undefined, dividendQueryParams(query));
+	}
+
+	getDividend(id: string) {
+		return this.request("GET", `/dividend/${encodeURIComponent(id)}`);
+	}
+
+	createDividend(body: DividendWrite) {
+		return this.request("POST", "/dividend", body);
+	}
+
+	updateDividend(id: string, body: DividendWrite) {
+		return this.request("PUT", `/dividend/${encodeURIComponent(id)}`, body);
+	}
+
+	deleteDividend(id: string) {
+		return this.request("DELETE", `/dividend/${encodeURIComponent(id)}`);
 	}
 
 	private async request(

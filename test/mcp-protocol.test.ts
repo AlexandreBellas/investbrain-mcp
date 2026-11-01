@@ -59,7 +59,8 @@ describe("MCP protocol", () => {
 		};
 		const tools = listedBody.result?.tools ?? [];
 		expect(tools.map((tool) => tool.name)).toContain("investbrain_get_me");
-		expect(tools).toHaveLength(15);
+		expect(tools).toHaveLength(20);
+		expect(tools.map((tool) => tool.name)).toContain("investbrain_list_dividends");
 		expect(tools.find((tool) => tool.name === "investbrain_delete_portfolio")?.annotations?.destructiveHint).toBe(
 			true,
 		);
@@ -105,7 +106,7 @@ describe("MCP protocol", () => {
 			result?: { tools?: { name: string; inputSchema?: Record<string, unknown> }[] };
 		};
 		const tools = listedBody.result?.tools ?? [];
-		expect(tools).toHaveLength(15);
+		expect(tools).toHaveLength(20);
 		for (const tool of tools) {
 			expect(tool.inputSchema?.type, tool.name).toBe("object");
 			expect(tool.inputSchema?.oneOf, tool.name).toBeUndefined();
@@ -116,6 +117,53 @@ describe("MCP protocol", () => {
 			| { transaction_type?: { enum?: string[] } }
 			| undefined;
 		expect(properties?.transaction_type?.enum).toEqual(["BUY", "SELL"]);
+	});
+
+	it("returns the Investbrain 422 message when a dividend create is rejected", async () => {
+		const mocked = mockFetch(
+			() =>
+				new Response(
+					JSON.stringify({
+						message: "A dividend for this symbol and date already exists.",
+						errors: { date: ["A dividend for this symbol and date already exists."] },
+					}),
+					{ status: 422 },
+				),
+		);
+		vi.stubGlobal("fetch", mocked.fetch);
+		const env = testEnv();
+		const handler = createMcpHandler((ctx) => {
+			if (ctx.requestInfo === undefined) throw new Error("missing request");
+			return createInvestbrainServer(ctx.requestInfo, env);
+		});
+		const response = await handler.fetch(
+			new Request("https://investbrain-mcp.example.workers.dev/mcp", {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${TOKEN}`,
+					Accept: "application/json, text/event-stream",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 3,
+					method: "tools/call",
+					params: {
+						name: "investbrain_create_dividend",
+						arguments: { symbol: "PETR4.SA", date: "2024-08-15", dividend_amount: 0.85 },
+					},
+				}),
+			}),
+		);
+		expect(response.status).toBe(200);
+		const body = (await readMcpBody(response)) as {
+			result?: { isError?: boolean; content?: { text: string }[] };
+		};
+		expect(body.result?.isError).toBe(true);
+		expect(body.result?.content?.[0]?.text).toBe(
+			"Investbrain API returned 422: A dividend for this symbol and date already exists.; date: A dividend for this symbol and date already exists.",
+		);
+		expect(JSON.stringify(body)).not.toContain(TOKEN);
 	});
 
 	it("returns an upstream 401 from a tool call when the probe was cached", async () => {
